@@ -114,3 +114,32 @@ You can activate the chatbot using:
 - Internet connection is required
 - First startup may take some time
 - Works best with a microphone and speaker
+
+
+# Acrobot-Service-rpi4
+
+## Step 1 — Copy all 4 files to your Pi project folder:
+```
+# destination: /home/test/Desktop/Acrobot-2.2/
+```
+
+## Step 2 — Run the service setup (as user test, no sudo):
+```
+cd /home/test/Desktop/Acrobot-2.2
+chmod +x setup_service.sh
+./setup_service.sh
+```
+
+## Step 3 — Reboot and verify the bot starts on its own:
+```
+sudo reboot
+# wait 30 seconds, then:
+./check_status.sh
+```
+
+## Step 4 — Run lockdown (with sudo), and when it asks about SSH choose option 2:
+```
+sudo ./lockdown.sh
+# When it asks "Choose SSH policy [1/2/3]" → type 2
+# This keeps SSH ON but disables password login
+```
