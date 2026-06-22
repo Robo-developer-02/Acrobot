@@ -1,0 +1,37 @@
+[Unit]
+Description=AcroBot 2.2 — RAG Voice Chatbot
+# Start only after network and sound subsystem are ready
+After=network-online.target sound.target pulseaudio.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# ── Paths ─────────────────────────────────────────────────
+WorkingDirectory=/home/test/Desktop/Acrobot-2.2
+ExecStart=/home/test/Desktop/Acrobot-2.2/acrobot-env/bin/python \
+          /home/test/Desktop/Acrobot-2.2/acrobot.py
+
+# ── Environment ───────────────────────────────────────────
+# Give the venv python priority in PATH
+Environment=PATH=/home/test/Desktop/Acrobot-2.2/acrobot-env/bin:/usr/local/bin:/usr/bin:/bin
+# Load the project .env file (GROQ_API_KEY etc.)
+EnvironmentFile=/home/test/Desktop/Acrobot-2.2/.env
+# PulseAudio runtime socket — required for pygame/sounddevice audio
+Environment=PULSE_RUNTIME_PATH=/run/user/1000/pulse
+
+# ── Restart policy ────────────────────────────────────────
+# Always restart on crash with a 5-second cooldown.
+# This makes the chatbot self-healing — if the API blips or the
+# network drops briefly, the bot restarts and comes back on its own.
+Restart=always
+RestartSec=5
+
+# ── Logging ───────────────────────────────────────────────
+# All output goes to journald — view with:
+#   journalctl --user -u acrobot.service -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
