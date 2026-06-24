@@ -320,6 +320,110 @@ def is_blank(text: Optional[str]) -> bool:
 
 
 # ══════════════════════════════════════════════════════════
+#  CONTENT MODERATION
+#  Input is checked BEFORE it reaches the LLM. This is a lightweight
+#  keyword-based pre-filter. The LLM system prompt adds a second layer.
+#  Covers both English and Hinglish (Roman-script Hindi) patterns.
+#
+#  Categories blocked:
+#    1. Profanity / sexual language (EN + HI)
+#    2. Violence / threats
+#    3. Harassment / targeted abuse
+#    4. Prompt-injection / jailbreak attempts
+#    5. Politically inflammatory content
+# ══════════════════════════════════════════════════════════
+
+# Each tuple: (regex_pattern, log_label)
+_BLOCKED_PATTERNS: List[Tuple[re.Pattern, str]] = []
+
+_RAW_BLOCKED = [
+    # ── Profanity / Sexual (English) ─────────────────────────────
+    (r"\bf+u+c+k+\b",           "profanity-en"),
+    (r"\bs+h+i+t+\b",           "profanity-en"),
+    (r"\bb+i+t+c+h+\b",         "profanity-en"),
+    (r"\bass+h+o+l+e+\b",       "profanity-en"),
+    (r"\bc+u+n+t+\b",           "profanity-en"),
+    (r"\bd+i+c+k+\b",           "profanity-en"),
+    (r"\bp+u+s+s+y+\b",         "profanity-en"),
+    (r"\bn+i+g+g+\w*\b",        "slur-en"),
+    (r"\bsex\b",                 "sexual-en"),
+    (r"\bporn\w*\b",             "sexual-en"),
+    (r"\bnude\w*\b",             "sexual-en"),
+    (r"\bboob\w*\b",             "sexual-en"),
+    (r"\bpenis\b",               "sexual-en"),
+    (r"\bvagina\b",              "sexual-en"),
+    # ── Profanity / Sexual (Hinglish Roman) ──────────────────────
+    (r"\bmadarch\w*\b",          "profanity-hi"),
+    (r"\bbhench\w*\b",           "profanity-hi"),
+    (r"\bchutiy\w*\b",           "profanity-hi"),
+    (r"\bsaala\b",               "profanity-hi"),
+    (r"\bgandu\b",               "profanity-hi"),
+    (r"\bharamz\w*\b",           "profanity-hi"),
+    (r"\bkamina\b",              "profanity-hi"),
+    (r"\blund\b",                "sexual-hi"),
+    (r"\bchut\b",                "sexual-hi"),
+    (r"\bsex\s*kar\w*\b",        "sexual-hi"),
+    (r"\bnanga\b",               "sexual-hi"),
+    # ── Violence / Threats ────────────────────────────────────────
+    (r"\bkill\s+you\b",          "threat-en"),
+    (r"\bi\s+will\s+kill\b",     "threat-en"),
+    (r"\bbomb\b",                "threat-en"),
+    (r"\bterror\w*\b",           "threat-en"),
+    (r"\bblast\s+airport\b",     "threat-en"),
+    (r"\bmarunga\b",             "threat-hi"),
+    (r"\bjaan\s+se\s+marunga\b", "threat-hi"),
+    (r"\bbomb\s+rakh\w*\b",      "threat-hi"),
+    # ── Prompt Injection / Jailbreak ─────────────────────────────
+    (r"\bignore\s+(all\s+)?previous\s+instructions?\b",  "jailbreak"),
+    (r"\bpretend\s+(you\s+are|to\s+be)\b",              "jailbreak"),
+    (r"\bact\s+as\s+(a\s+)?different\b",                "jailbreak"),
+    (r"\byou\s+are\s+now\s+(dan|jailbreak\w*)\b",       "jailbreak"),
+    (r"\bsystem\s*prompt\b",                            "jailbreak"),
+    (r"\bforget\s+your\s+(rules?|instructions?)\b",     "jailbreak"),
+    (r"\bdo\s+anything\s+now\b",                        "jailbreak"),
+    (r"\bno\s+restrictions?\b",                         "jailbreak"),
+]
+
+for _raw, _label in _RAW_BLOCKED:
+    try:
+        _BLOCKED_PATTERNS.append((re.compile(_raw, re.IGNORECASE), _label))
+    except re.error as _re_exc:
+        logger.warning("Bad moderation pattern %r skipped: %s", _raw, _re_exc)
+
+MAX_INPUT_CHARS = 500   # ~60-70 spoken words; anything longer is suspicious
+
+_REFUSAL_EN = (
+    "I'm here to help with questions about Acropolis Institute only. "
+    "Please keep our conversation respectful."
+)
+_REFUSAL_HI = (
+    "Mein sirf Acropolis Institute ke sawaalon mein madad karta hoon. "
+    "Kripya izzat se baat karein."
+)
+
+
+def moderate_input(text: str, lang: str) -> Optional[str]:
+    """
+    Return a refusal string if `text` violates content policy, else None.
+    Checks:
+      1. Input is too long (likely abuse or accidental stream).
+      2. Any blocked keyword/pattern matches.
+    The caller should speak() the returned string and skip the LLM if
+    this returns a non-None value.
+    """
+    if len(text) > MAX_INPUT_CHARS:
+        logger.warning("Input too long (%d chars) — blocked.", len(text))
+        return _REFUSAL_HI if lang == "hi" else _REFUSAL_EN
+
+    for pattern, label in _BLOCKED_PATTERNS:
+        if pattern.search(text):
+            logger.warning("Blocked input [%s]: %r", label, text[:80])
+            return _REFUSAL_HI if lang == "hi" else _REFUSAL_EN
+
+    return None
+
+
+# ══════════════════════════════════════════════════════════
 #  RAG ENGINE
 # ══════════════════════════════════════════════════════════
 
@@ -505,6 +609,11 @@ def get_ai_reply(user_text: str, lang: str, context: str) -> str:
     clean_input = sanitize_text(user_text)
     if is_blank(clean_input):
         raise ValueError("get_ai_reply received empty or whitespace-only input.")
+
+    # ── Content moderation pre-filter ─────────────────────
+    refusal = moderate_input(clean_input, lang)
+    if refusal:
+        return refusal
 
     lang_history = history[lang]
     lang_history.append({"role": "user", "content": clean_input})
